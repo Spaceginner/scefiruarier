@@ -1,0 +1,4 @@
+/target
+/.vscode
+/.idea
+/test-data/fibonacci.sfe
