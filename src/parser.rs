@@ -20,11 +20,9 @@ impl TryFrom<&str> for Program {
 
     fn try_from(code: &str) -> Result<Self, Self::Error> {
         let mut labels = HashMap::<String, u16>::new();
-
         let mut byte = 0;
 
-        let mut program = Vec::new();
-        code.lines()
+        Ok(Self(code.lines()
             .map(str::trim)
             .map(|s| s.splitn(2, ";").next().unwrap_or_default().trim())
             .filter(|s| !s.is_empty())
@@ -56,9 +54,7 @@ impl TryFrom<&str> for Program {
             })
             .filter(Option::is_some)
             .map(Option::unwrap)
-            .for_each(|mut raw_instr| program.append(&mut raw_instr));
-
-        Ok(Self(program))
+            .fold(Vec::new(), |mut program, mut instr_bytes| { program.append(&mut instr_bytes); program })))
     }
 }
 
