@@ -56,21 +56,23 @@ fn main() {
     let compiled_binary = Program::try_from(source_code.as_ref()).expect("fuuuck you :b");
     let compilation_took = compile_start_time.elapsed();
 
-    match args.output.as_ref() {
-        Some(output) => match output.as_ref() {
-            Some(path) => save(path, compiled_binary.get_binary()),
-            None => {
-                let mut stdout = std::io::stdout();
-                stdout.write(compiled_binary.get_binary()).expect("failed to print the binary");
-                stdout.flush().expect("couldnt flush the stdout");
+    if !args.dry_run {
+        match args.output.as_ref() {
+            Some(output) => match output.as_ref() {
+                Some(path) => save(path, compiled_binary.get_binary()),
+                None => {
+                    let mut stdout = std::io::stdout();
+                    stdout.write(compiled_binary.get_binary()).expect("failed to print the binary");
+                    stdout.flush().expect("couldnt flush the stdout");
+                }
             },
-        },
-        None => {
-            save(match args.input.as_ref() {
-                None => format!("your code but cooked for useless cpu at 180°C in a horrible parser for {} seconds.sfe", compilation_took.as_secs()),
-                Some(input_file) => format!("{}.sfe", Path::new(input_file).file_stem().expect("there is no filename (stem)?").to_str().expect("it is not a string..?")),
-            }, compiled_binary.get_binary());
-        }
+            None => {
+                save(match args.input.as_ref() {
+                    None => format!("your code but cooked for useless cpu at 180°C in a horrible parser for {} seconds.sfe", compilation_took.as_secs()),
+                    Some(input_file) => format!("{}.sfe", Path::new(input_file).file_stem().expect("there is no filename (stem)?").to_str().expect("it is not a string..?")),
+                }, compiled_binary.get_binary());
+            }
+        };
     };
 }
 
