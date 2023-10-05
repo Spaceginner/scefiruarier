@@ -1,8 +1,37 @@
 use std::collections::HashMap;
+use std::fmt;
+use std::fmt::Formatter;
 
 
-macro_rules! ok {
-    ($v:expr) => { $v.ok_or(()) };
+#[derive(Debug)]
+pub enum CompilationError {
+    InvalidInstruction(String),
+    InvalidRegister(String),
+    LabelNotFound(String),
+    ParametersCountMismatch(usize),
+}
+
+fn ordinal_prefix(n: usize) -> &'static str {
+    match n {
+        11 | 12 | 13 => "th",
+        n => match n {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        }
+    }
+}
+
+impl fmt::Display for CompilationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            CompilationError::InvalidInstruction(instr) => write!(f, "instruction '{instr}' is invalid"),
+            CompilationError::InvalidRegister(reg) => write!(f, "register '{reg}' is invalid"),
+            CompilationError::LabelNotFound(label) => write!(f, "label '{label}' was not found"),
+            CompilationError::ParametersCountMismatch(attempted) => write!(f, "instruction was expected to have {attempted}{} parameter", ordinal_prefix(*attempted)),
+        }
+    }
 }
 
 pub struct Program(Vec<u8>);
@@ -16,45 +45,50 @@ impl Program {
 
 
 impl TryFrom<&str> for Program {
-    type Error = ();
+    type Error = CompilationError;
 
     fn try_from(code: &str) -> Result<Self, Self::Error> {
         let mut labels = HashMap::<String, u16>::new();
         let mut byte = 0;
 
-        Ok(Self(code.lines()
+        let instructions = code.lines()
             .map(str::trim)
             .map(|s| s.splitn(2, ";").next().unwrap_or_default().trim())
             .filter(|s| !s.is_empty())
-            .map(|s| Token::try_from(s).expect("fuk u"))
-            .map(|token| {
+            .map(|s| Ok(Token::try_from(s)?))
+            .filter_map(|token| {
                 match token {
-                    Token::Label(label) => { labels.insert(label, byte); None },
-                    Token::Instruction(instr) => Some({
-                        byte += instr.clone().size();
-                        match instr.clone() {
-                            Instruction::Copy([reg_a, reg_b]) |
-                            Instruction::CopyIfZero([reg_a, reg_b]) |
-                            Instruction::CopyIfNotZero([reg_a, reg_b]) => {
-                                vec![instr.into(), reg_a.into(), reg_b.into()]
-                            },
-                            Instruction::Move([val]) |
-                            Instruction::MoveIfZero([val]) |
-                            Instruction::MoveIfNotZero([val]) => {
-                                let value = match val {
-                                    Value::Integer(int) => int,
-                                    Value::LabelReference(label) => *labels.get(&label).unwrap_or_else(|| panic!("label 404"))
-                                }.to_be_bytes();
-                                vec![instr.into(), value[0], value[1]]
-                            },
-                            instr => vec![instr.into()]
-                        }
-                    })
+                    Err(e) => Some(Err(e)),
+                    Ok(token) => match token {
+                        Token::Label(label) => { labels.insert(label, byte); None },
+                        Token::Instruction(instr) => Some(Ok(instr)),
+                    }
                 }
             })
-            .filter(Option::is_some)
-            .map(Option::unwrap)
-            .fold(Vec::new(), |mut program, mut instr_bytes| { program.append(&mut instr_bytes); program })))
+            .try_fold(Vec::new(), |mut instrs, instr| { instrs.push(instr?); Ok(instrs) })?;
+
+        Ok(Self(instructions.iter()
+            .map(|instruction| {
+                byte += instruction.clone().size();
+                match instruction.clone() {
+                    Instruction::Copy([reg_a, reg_b]) |
+                    Instruction::CopyIfZero([reg_a, reg_b]) |
+                    Instruction::CopyIfNotZero([reg_a, reg_b]) => {
+                        Ok(vec![instruction.clone().into(), reg_a.into(), reg_b.into()])
+                    },
+                    Instruction::Move([val]) |
+                    Instruction::MoveIfZero([val]) |
+                    Instruction::MoveIfNotZero([val]) => {
+                        let value = match val {
+                            Value::Integer(int) => int,
+                            Value::LabelReference(label) => *labels.get(&label).ok_or(CompilationError::LabelNotFound(label))?
+                        }.to_be_bytes();
+                        Ok(vec![instruction.clone().into(), value[0], value[1]])
+                    },
+                    instr => Ok(vec![instr.into()])
+                }
+            })
+            .try_fold(Vec::new(), |mut program, instr_bytes| { program.append(&mut instr_bytes?); Ok(program) })?))
     }
 }
 
@@ -64,7 +98,7 @@ pub enum Token {
 }
 
 impl TryFrom<&str> for Token {
-    type Error = ();
+    type Error = CompilationError;
 
     fn try_from(raw: &str) -> Result<Self, Self::Error> {
         if let Some(label) = raw.trim().strip_suffix(":") {
@@ -199,7 +233,7 @@ impl From<Instruction> for u8 {
 }
 
 impl TryFrom<&str> for Instruction {
-    type Error = ();
+    type Error = CompilationError;
 
     fn try_from(instr: &str) -> Result<Self, Self::Error> {
         let mut line = instr.trim().splitn(2, ' ');
@@ -207,6 +241,9 @@ impl TryFrom<&str> for Instruction {
         let raw_instr = line.next().unwrap_or_default();
         let args = line.next().unwrap_or_default().split(',').map(str::trim).collect::<Vec<_>>();
 
+        macro_rules! ok {
+            ($arg:expr, $atmp:expr) => { $arg.ok_or(CompilationError::ParametersCountMismatch($atmp))? };
+        }
 
         match raw_instr {
             "noop" => Ok(Self::NoOperation),
@@ -223,12 +260,12 @@ impl TryFrom<&str> for Instruction {
             "cmpr" => Ok(Self::CompareUnsigned),
             "cmprs" => Ok(Self::CompareSigned),
 
-            "cp" => Ok(Self::Copy([Register::try_from(*ok!(args.get(0))?)?, Register::try_from(*ok!(args.get(1))?)?])),
-            "mv" => Ok(Self::Move([Value::from(*ok!(args.get(0))?)])),
-            "cpz" => Ok(Self::CopyIfZero([Register::try_from(*ok!(args.get(0))?)?, Register::try_from(*ok!(args.get(1))?)?])),
-            "mvz" => Ok(Self::Move([Value::from(*ok!(args.get(0))?)])),
-            "cpnz" => Ok(Self::CopyIfNotZero([Register::try_from(*ok!(args.get(0))?)?, Register::try_from(*ok!(args.get(1))?)?])),
-            "mvnz" => Ok(Self::Move([Value::from(*ok!(args.get(0))?)])),
+            "cp" => Ok(Self::Copy([Register::try_from(*ok!(args.get(0), 0))?, Register::try_from(*ok!(args.get(1), 1))?])),
+            "mv" => Ok(Self::Move([Value::from(*ok!(args.get(0), 0))])),
+            "cpz" => Ok(Self::CopyIfZero([Register::try_from(*ok!(args.get(0), 0))?, Register::try_from(*ok!(args.get(1), 1))?])),
+            "mvz" => Ok(Self::Move([Value::from(*ok!(args.get(0), 0))])),
+            "cpnz" => Ok(Self::CopyIfNotZero([Register::try_from(*ok!(args.get(0), 0))?, Register::try_from(*ok!(args.get(1), 1))?])),
+            "mvnz" => Ok(Self::Move([Value::from(*ok!(args.get(0), 0))])),
             "put" => Ok(Self::Put),
             "get" => Ok(Self::Get),
 
@@ -243,7 +280,7 @@ impl TryFrom<&str> for Instruction {
             "send" => Ok(Self::Send),
             "rcv" => Ok(Self::Receive),
 
-            _ => Err(()),
+            isntr => Err(CompilationError::InvalidInstruction(instr.to_string())),
         }
     }
 }
@@ -268,7 +305,7 @@ pub enum Register {
 }
 
 impl TryFrom<&str> for Register {
-    type Error = ();
+    type Error = CompilationError;
 
     fn try_from(reg: &str) -> Result<Self, Self::Error> {
         match reg.trim() {
@@ -299,7 +336,7 @@ impl TryFrom<&str> for Register {
             "rba" => Ok(Self::BurnerA),
             "rbb" => Ok(Self::BurnerB),
 
-            _ => Err(()),
+            reg => Err(CompilationError::InvalidRegister(reg.to_string())),
         }
     }
 }

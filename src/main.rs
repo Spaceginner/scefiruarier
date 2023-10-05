@@ -53,7 +53,11 @@ fn main() {
     }).expect("invalid utf-8 file or smth");
 
     let compile_start_time = Instant::now();
-    let compiled_binary = Program::try_from(source_code.as_ref()).expect("fuuuck you :b");
+    let compiled_binary = Program::try_from(source_code.as_ref())
+        .unwrap_or_else(|err| {
+            eprintln!("your code sucks: {err}");
+            std::process::exit(1);
+        });
     let compilation_took = compile_start_time.elapsed();
 
     if !args.dry_run {
