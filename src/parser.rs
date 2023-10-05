@@ -61,7 +61,10 @@ impl TryFrom<&str> for Program {
                     Err(e) => Some(Err(e)),
                     Ok(token) => match token {
                         Token::Label(label) => { labels.insert(label, byte); None },
-                        Token::Instruction(instr) => Some(Ok(instr)),
+                        Token::Instruction(instr) => {
+                            byte += instr.clone().size();
+                            Some(Ok(instr))
+                        },
                     }
                 }
             })
@@ -69,7 +72,6 @@ impl TryFrom<&str> for Program {
 
         Ok(Self(instructions.iter()
             .map(|instruction| {
-                byte += instruction.clone().size();
                 match instruction.clone() {
                     Instruction::Copy([reg_a, reg_b]) |
                     Instruction::CopyIfZero([reg_a, reg_b]) |
