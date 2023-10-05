@@ -251,13 +251,20 @@ impl TryFrom<&str> for Instruction {
 #[derive(Debug, Copy, Clone)]
 pub enum Register {
     GenericA, GenericB, GenericC,
-    GenericD, GenericE, GenericF,
+    GenericD, GenericE,
 
-    InstructionPointer, FlagBank,
+    StackPointer, InstructionPointer,
+    FlagBank,
 
     OperandA, OperandB, OperandC,
 
     DisplayA, DisplayB,
+
+    ParameterA, ParameterB, ParameterC,
+
+    ReturnA, ReturnB,
+
+    BurnerA, BurnerB,
 }
 
 impl TryFrom<&str> for Register {
@@ -270,8 +277,8 @@ impl TryFrom<&str> for Register {
             "rgc" => Ok(Self::GenericC),
             "rgd" => Ok(Self::GenericD),
             "rge" => Ok(Self::GenericE),
-            "rgf" => Ok(Self::GenericF),
 
+            "rsp" => Ok(Self::StackPointer),
             "rip" => Ok(Self::InstructionPointer),
             "rfb" => Ok(Self::FlagBank),
 
@@ -281,6 +288,16 @@ impl TryFrom<&str> for Register {
 
             "rda" => Ok(Self::DisplayA),
             "rdb" => Ok(Self::DisplayB),
+
+            "rpa" => Ok(Self::ParameterA),
+            "rpb" => Ok(Self::ParameterB),
+            "rpc" => Ok(Self::ParameterC),
+
+            "rra" => Ok(Self::ReturnA),
+            "rrb" => Ok(Self::ReturnB),
+
+            "rba" => Ok(Self::BurnerA),
+            "rbb" => Ok(Self::BurnerB),
 
             _ => Err(()),
         }
@@ -296,7 +313,7 @@ impl From<Register> for u8 {
             Register::GenericC => 0b00000010,
             Register::GenericD => 0b00000011,
             Register::GenericE => 0b00000100,
-            Register::GenericF => 0b00000101,
+            Register::StackPointer => 0b00000101,
             Register::InstructionPointer => 0b00000110,
             Register::FlagBank => 0b00000111,
             Register::OperandA => 0b00001000,
@@ -304,6 +321,13 @@ impl From<Register> for u8 {
             Register::OperandC => 0b00001010,
             Register::DisplayA => 0b00001011,
             Register::DisplayB => 0b00001100,
+            Register::ParameterA => 0b00001101,
+            Register::ParameterB => 0b00001110,
+            Register::ParameterC => 0b00001111,
+            Register::ReturnA => 0b00010000,
+            Register::ReturnB => 0b00010001,
+            Register::BurnerA => 0b00010010,
+            Register::BurnerB => 0b00010011,
         }
     }
 }
