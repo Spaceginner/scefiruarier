@@ -121,7 +121,8 @@ pub enum Value16 {
 }
 
 impl From<&str> for Value16 {
-    fn from(value: &str) -> Self {
+    fn from(value_h: &str) -> Self {
+        let value = value_h.replace("_", "");
         if let Ok(num) = value.parse() {
             Self::Integer(num)
         } else if let Some(hex) = value.strip_prefix("0x") {
@@ -131,7 +132,7 @@ impl From<&str> for Value16 {
         } else if let Some(binary) = value.strip_prefix("0b") {
             Self::Integer(u16::from_str_radix(binary, 2).expect("pls write correct binary nums or dont use 0b prefix in labels thx"))
         } else {
-            Self::LabelReference(String::from(value))
+            Self::LabelReference(String::from(value_h))
         }
     }
 }
@@ -145,7 +146,8 @@ pub enum Value8 {
 impl TryFrom<&str> for Value8 {
     type Error = CompilationError;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value_h: &str) -> Result<Self, Self::Error> {
+        let value = value_h.replace("_", "");
         if let Ok(num) = value.parse() {
             Ok(Self::Integer(num))
         } else if let Some(hex) = value.strip_prefix("0x") {
