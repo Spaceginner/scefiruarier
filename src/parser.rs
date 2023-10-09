@@ -279,8 +279,8 @@ impl TryFrom<&str> for Instruction {
             "setnnz" => Ok(Self::SetIfNotZero),
             "unsetnz" => Ok(Self::UnsetIfNotZero),
 
-            "send" => Ok(Self::Send),
-            "rcv" => Ok(Self::Receive),
+            "write" => Ok(Self::Write),
+            "read" => Ok(Self::Read),
 
             isntr => Err(CompilationError::InvalidInstruction(instr.to_string())),
         }
