@@ -9,6 +9,7 @@ pub enum CompilationError {
     InvalidRegister(String),
     LabelNotFound(String),
     ParametersCountMismatch(usize),
+    ValueParsingError(String, usize),
 }
 
 fn ordinal_prefix(n: usize) -> &'static str {
@@ -30,6 +31,7 @@ impl fmt::Display for CompilationError {
             CompilationError::InvalidRegister(reg) => write!(f, "register '{reg}' is invalid"),
             CompilationError::LabelNotFound(label) => write!(f, "label '{label}' was not found"),
             CompilationError::ParametersCountMismatch(attempted) => write!(f, "instruction was expected to have {attempted}{} parameter", ordinal_prefix(*attempted)),
+            CompilationError::ValueParsingError(original, size) => write!(f, "value '{original}' cannot be parsed as a {size}-bit integer")
         }
     }
 }
@@ -82,8 +84,8 @@ impl TryFrom<&str> for Program {
                     Instruction::MoveIfZero([val]) |
                     Instruction::MoveIfNotZero([val]) => {
                         let value = match val {
-                            Value::Integer(int) => int,
-                            Value::LabelReference(label) => *labels.get(&label).ok_or(CompilationError::LabelNotFound(label))?
+                            Value16::Integer(int) => int,
+                            Value16::LabelReference(label) => *labels.get(&label).ok_or(CompilationError::LabelNotFound(label))?
                         }.to_be_bytes();
                         Ok(vec![instruction.clone().into(), value[0], value[1]])
                     },
@@ -113,12 +115,12 @@ impl TryFrom<&str> for Token {
 
 
 #[derive(Debug, Clone)]
-pub enum Value {
+pub enum Value16 {
     Integer(u16),
     LabelReference(String),
 }
 
-impl From<&str> for Value {
+impl From<&str> for Value16 {
     fn from(value: &str) -> Self {
         if let Ok(num) = value.parse() {
             Self::Integer(num)
@@ -135,6 +137,44 @@ impl From<&str> for Value {
 }
 
 
+#[derive(Debug, Copy, Clone)]
+pub enum Value8 {
+    Integer(u8),
+}
+
+impl TryFrom<&str> for Value8 {
+    type Error = CompilationError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if let Ok(num) = value.parse() {
+            Ok(Self::Integer(num))
+        } else if let Some(hex) = value.strip_prefix("0x") {
+            Ok(Self::Integer(u8::from_str_radix(hex, 16).expect("pls write correct hex nums or dont use 0x prefix in labels thx")))
+        } else if let Some(hex) = value.strip_prefix("0o") {
+            Ok(Self::Integer(u8::from_str_radix(hex, 7).expect("pls write correct hex nums or dont use 0x prefix in labels thx")))
+        } else if let Some(hex) = value.strip_prefix("0b") {
+            Ok(Self::Integer(u8::from_str_radix(hex, 2).expect("pls write correct hex nums or dont use 0x prefix in labels thx")))
+        } else if let Some(raahhh) = value.strip_prefix("'") {
+            if let Some(rah) = raahhh.strip_suffix("'") {
+                if rah.len() == 1 && rah.chars().all(|c| c.is_ascii()) {
+                    Ok(Self::Integer(rah.chars().next().unwrap() as u8))
+                } else {
+                    Err(CompilationError::ValueParsingError(value.to_string(), 8))
+                }
+            } else {
+                if raahhh.is_empty() {
+                    Ok(Self::Integer(' ' as u8))
+                } else {
+                    Err(CompilationError::ValueParsingError(value.to_string(), 8))
+                }
+            }
+        } else {
+            Err(CompilationError::ValueParsingError(value.to_string(), 8))
+        }
+    }
+}
+
+
 #[derive(Debug, Clone)]
 pub enum Instruction {
     NoOperation, Halt,
@@ -144,9 +184,9 @@ pub enum Instruction {
     BitshiftRight, BitshiftLeft,
     CompareUnsigned, CompareSigned,
 
-    Copy([Register; 2]), Move([Value; 1]),
-    CopyIfZero([Register; 2]), MoveIfZero([Value; 1]),
-    CopyIfNotZero([Register; 2]), MoveIfNotZero([Value; 1]),
+    Copy([Register; 2]), Move([Value16; 1]),
+    CopyIfZero([Register; 2]), MoveIfZero([Value16; 1]),
+    CopyIfNotZero([Register; 2]), MoveIfNotZero([Value16; 1]),
     Put, Get,
 
     Test,
@@ -154,7 +194,10 @@ pub enum Instruction {
     SetIfZero, UnsetIfZero,
     SetIfNotZero, UnsetIfNotZero,
 
-    Send, Receive,
+    Write,
+    Read,
+
+    CompilerSpecial_DefineByte([Value8; 1]),  // ok, i understand your worrying, no need to
 }
 
 impl Instruction {
@@ -187,8 +230,9 @@ impl Instruction {
             Instruction::UnsetIfZero => 1,
             Instruction::SetIfNotZero => 1,
             Instruction::UnsetIfNotZero => 1,
-            Instruction::Send => 1,
-            Instruction::Receive => 1,
+            Instruction::Write => 1,
+            Instruction::Read => 1,
+            Instruction::CompilerSpecial_DefineByte(_) => 1,
         }
     }
 }
@@ -228,8 +272,10 @@ impl From<Instruction> for u8 {
             Instruction::SetIfNotZero => 0b0100_0110,
             Instruction::UnsetIfNotZero => 0b0100_0111,
 
-            Instruction::Send => 0b0101_0000,
-            Instruction::Receive => 0b0101_0001,
+            Instruction::Write => 0b0101_0000,
+            Instruction::Read => 0b0101_0001,
+
+            Instruction::CompilerSpecial_DefineByte([Value8::Integer(the_byte)]) => the_byte,  // uh, yeah about this...
         }
     }
 }
@@ -263,11 +309,11 @@ impl TryFrom<&str> for Instruction {
             "cmprs" => Ok(Self::CompareSigned),
 
             "cp" => Ok(Self::Copy([Register::try_from(*ok!(args.get(0), 0))?, Register::try_from(*ok!(args.get(1), 1))?])),
-            "mv" => Ok(Self::Move([Value::from(*ok!(args.get(0), 0))])),
+            "mv" => Ok(Self::Move([Value16::from(*ok!(args.get(0), 0))])),
             "cpz" => Ok(Self::CopyIfZero([Register::try_from(*ok!(args.get(0), 0))?, Register::try_from(*ok!(args.get(1), 1))?])),
-            "mvz" => Ok(Self::Move([Value::from(*ok!(args.get(0), 0))])),
+            "mvz" => Ok(Self::Move([Value16::from(*ok!(args.get(0), 0))])),
             "cpnz" => Ok(Self::CopyIfNotZero([Register::try_from(*ok!(args.get(0), 0))?, Register::try_from(*ok!(args.get(1), 1))?])),
-            "mvnz" => Ok(Self::Move([Value::from(*ok!(args.get(0), 0))])),
+            "mvnz" => Ok(Self::Move([Value16::from(*ok!(args.get(0), 0))])),
             "put" => Ok(Self::Put),
             "get" => Ok(Self::Get),
 
@@ -281,6 +327,8 @@ impl TryFrom<&str> for Instruction {
 
             "write" => Ok(Self::Write),
             "read" => Ok(Self::Read),
+
+            "db" => Ok(Self::CompilerSpecial_DefineByte([Value8::try_from(*ok!(args.get(0), 0))?])),
 
             instr => Err(CompilationError::InvalidInstruction(instr.to_string())),
         }
