@@ -282,7 +282,7 @@ impl TryFrom<&str> for Instruction {
             "write" => Ok(Self::Write),
             "read" => Ok(Self::Read),
 
-            isntr => Err(CompilationError::InvalidInstruction(instr.to_string())),
+            instr => Err(CompilationError::InvalidInstruction(instr.to_string())),
         }
     }
 }
